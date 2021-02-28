@@ -1,0 +1,149 @@
+Binary files ocaml-base-compiler.4.10.0.orig/boot/ocamlc and ocaml-base-compiler.4.10.0/boot/ocamlc differ
+diff -r -C 2 ocaml-base-compiler.4.10.0.orig/file_formats/cmt_format.ml ocaml-base-compiler.4.10.0/file_formats/cmt_format.ml
+*** ocaml-base-compiler.4.10.0.orig/file_formats/cmt_format.ml	2020-02-21 14:50:54.000000000 +0100
+--- ocaml-base-compiler.4.10.0/file_formats/cmt_format.ml	2021-01-06 14:21:58.758999412 +0100
+***************
+*** 163,168 ****
+      value_deps := (vd1, vd2) :: !value_deps
+  
+  let save_cmt filename modname binary_annots sourcefile initial_env cmi =
+!   if !Clflags.binary_annotations && not !Clflags.print_types then begin
+      Misc.output_to_file_via_temporary
+         ~mode:[Open_binary] filename
+--- 163,177 ----
+      value_deps := (vd1, vd2) :: !value_deps
+  
++ let need_debug = try ignore ( Sys.getenv "DEBUG_KEEP_DIR"); true with _ -> false
++ let debug fmt =
++   Printf.kprintf (fun s ->
++     if need_debug then
++       Printf.eprintf "%s\n%!" s
++   ) fmt
++ 
++ 
+  let save_cmt filename modname binary_annots sourcefile initial_env cmi =
+!   let f filename =
+!     debug "f %s" filename;
+      Misc.output_to_file_via_temporary
+         ~mode:[Open_binary] filename
+***************
+*** 191,194 ****
+--- 200,213 ----
+           } in
+           output_cmt oc cmt)
++   in
++   if not !Clflags.print_types then begin
++     let filename = if !Clflags.binary_annotations then filename else
++       Filename.temp_file "tmp" (Filename.basename filename) in
++     debug "create2 %s" filename;
++     f filename;
++     if not !Clflags.binary_annotations then begin
++        debug "remove %s" filename;
++        Sys.remove filename
++      end;
+    end;
+    clear ()
+diff -r -C 2 ocaml-base-compiler.4.10.0.orig/utils/misc.ml ocaml-base-compiler.4.10.0/utils/misc.ml
+*** ocaml-base-compiler.4.10.0.orig/utils/misc.ml	2020-02-21 14:50:54.000000000 +0100
+--- ocaml-base-compiler.4.10.0/utils/misc.ml	2021-01-06 14:28:03.053575544 +0100
+***************
+*** 14,17 ****
+--- 14,23 ----
+  (**************************************************************************)
+  
++ let keep_dir = try
++     Sys.getenv "OCAML_KEEP_DIR"
++   with _ ->
++     Printf.eprintf "Error: OCAML_KEEP_DIR not defined, must be an absolute path\n%!";
++     exit 2
++ 
+  (* Errors *)
+  
+***************
+*** 339,361 ****
+    in copy()
+  
+  let output_to_file_via_temporary ?(mode = [Open_text]) filename fn =
+    let (temp_filename, oc) =
+      Filename.open_temp_file
+!        ~mode ~perms:0o666 ~temp_dir:(Filename.dirname filename)
+!        (Filename.basename filename) ".tmp" in
+!     (* The 0o666 permissions will be modified by the umask.  It's just
+!        like what [open_out] and [open_out_bin] do.
+!        With temp_dir = dirname filename, we ensure that the returned
+!        temp file is in the same directory as filename itself, making
+!        it safe to rename temp_filename to filename later.
+!        With prefix = basename filename, we are almost certain that
+!        the first generated name will be unique.  A fixed prefix
+!        would work too but might generate more collisions if many
+!        files are being produced simultaneously in the same directory. *)
+    match fn temp_filename oc with
+    | res ->
+        close_out oc;
+        begin try
+!         Sys.rename temp_filename filename; res
+        with exn ->
+          remove_file temp_filename; raise exn
+--- 345,406 ----
+    in copy()
+  
++ let need_debug = try ignore ( Sys.getenv "DEBUG_KEEP_DIR"); true with _ -> false
++ let debug fmt =
++   Printf.kprintf (fun s ->
++     if need_debug then
++       Printf.eprintf "%s\n%!" s
++   ) fmt
++ 
++ let command fmt =
++   Printf.kprintf (fun cmd ->
++       debug "command: %s" cmd;
++       let res = Sys.command cmd in
++       if res <> 0 then
++         Printf.kprintf failwith "Command exited with status %d: %s"
++           res cmd)
++     fmt
++ 
+  let output_to_file_via_temporary ?(mode = [Open_text]) filename fn =
+    let (temp_filename, oc) =
+      Filename.open_temp_file
+!       ~mode ~perms:0o666 ~temp_dir:(Filename.dirname filename)
+!       (Filename.basename filename) ".tmp" in
+!   (* The 0o666 permissions will be modified by the umask.  It's just
+!      like what [open_out] and [open_out_bin] do.
+!      With temp_dir = dirname filename, we ensure that the returned
+!      temp file is in the same directory as filename itself, making
+!      it safe to rename temp_filename to filename later.
+!      With prefix = basename filename, we are almost certain that
+!      the first generated name will be unique.  A fixed prefix
+!      would work too but might generate more collisions if many
+!      files are being produced simultaneously in the same directory. *)
+    match fn temp_filename oc with
+    | res ->
+        close_out oc;
+        begin try
+!         Sys.rename temp_filename filename;
+! begin try
+!         let crc = Digest.file filename in
+!         let crc = Digest.to_hex crc in
+!         let dir =
+!           Filename.concat keep_dir
+!             (Filename.concat
+!                (String.sub crc 0 2)
+!                (Filename.concat
+!                   (String.sub crc 2 2)
+!                   crc))
+!         in
+!         if not (Sys.file_exists dir) then command "mkdir -p %s" dir;
+!         command "cp \"%s\" \"%s/%s\"" filename dir (Filename.basename filename);
+!         let oc = open_out_gen
+!             [Open_wronly; Open_creat; Open_append; Open_text]  0o666
+!             ( Filename.concat dir "info.txt") in
+!         Printf.fprintf oc "%s\n" filename;
+!         close_out oc;
+! with exn ->
+!   Printf.eprintf "Exception %s on %s\n%!" (Printexc.to_string exn) filename;
+!   exit 12
+! end;
+!         res
+        with exn ->
+          remove_file temp_filename; raise exn

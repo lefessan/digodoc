@@ -1,0 +1,108 @@
+
+Ne pas hésiter à poser des questions sur Zulip, en particulier dans le
+canal "projet docs" pour Digodoc et dans le canal "opam" pour OPAM
+
+0. On va travailler dans $HOME/DIGODOC:
+
+    mkdir $HOME/DIGODOC
+    cd $HOME/DIGODOC
+    git clone git@github.com:ocamlpro/digodoc
+    cd digodoc
+    git remote add lefessan git@github.com:lefessan/digodoc
+    git fetch -a lefessan
+    git checkout z-2021-02-29-documentation
+
+    (vérifier qu'il y a bien un répertoire internship/ )
+
+1. Installer un switch opam maximal avec keep-dir
+
+  1.1 Compiler et installer la dernière version d'opam
+
+  Pour la suite, possibilité d'utiliser un OPAMROOT pour travailler sur un
+  opam dans un répertoire de travail plutot que sur le opam global.
+  (par exemple, OPAMROOT=$HOME/DIGODOC/opam, mais attention, il faut que
+   cette variable soit utilisée tout le temps, ce qui est compliqué...)
+
+  1.2 Utiliser une copie locale du repository OPAM pour la suite (pour
+    éviter les problèmes de mise à jour):
+
+    cd $HOME/DIGODOC
+    git clone git@github.com:ocaml/opam-repository
+    cd opam-repository
+    opam remote set-url --set-default default file://$(pwd)
+    opam remote
+
+  1.3 Un certain nombre de paquets peuvent poser problème quand on compile
+    un switch maximal avec ocaml 4.10.0, il faut les supprimer du
+    opam-repository local:
+
+    rm -rf packages/ocaml-secondary-compiler
+    rm -rf packages/ocamlfind-secondary
+
+  1.4 Utiliser une version du compilateur modifiée:
+
+    Prendre les sources de la version 4.10.0 d'OCaml et appliquer le patch
+    se trouvant dans le répertoire internship/ de Digodoc:
+
+    cd $HOME/DIGODOC
+    opam source ocaml-base-compiler.4.10.0
+    cd ocaml-base-compiler.4.10.0    
+    patch -p1 < $HOME/DIGODOC/digodoc/internship/digodoc-ocaml-4.10.0-keep-dir.patch
+
+    Créer une nouvelle archive avec ces sources patchés:
+
+    cd ..
+    tar zcf ocaml-base-compiler-keep-dir.4.10.0.tar.gz ocaml-base-compiler.4.10.0
+
+
+  1.5 Modifier le opam-repository local pour utiliser ce compilateur:
+
+    Editer le fichier
+    $HOME/DIGODOC/opam-repository/packages/ocaml-base-compiler/ocaml-base-compiler.4.10.0/opam
+
+    Il doit y avoir une rubrique url { src:... checksum:... }, la supprimer
+    et la remplacer par:
+
+    url {
+      src: "file:///home/.../DIGODOC/ocaml-base-compiler-keep-dir.4.10.0.tar.gz"
+    }
+
+   ( en remplaçant les ... par le nom d'utilisateur )
+
+   Faire `opam update` pour que opam recharge la nouvelle description
+
+ 1.6 Créer le switch de travail avec le compilateur patché:
+
+   On fixe d'abord l'endroit où les artefacts de compilation vont être mis:
+   
+   export OCAML_KEEP_DIR=$HOME/.opam/4.10.0-docs/keep-dir
+   ( en supposant qu'on utilise pas OPAMROOT, et que le switch est donc dans
+   $HOME/.opam )
+
+   On peut ensuite créer le switch:
+ 
+   opam switch create 4.10.0-docs 4.10.0
+
+   Puis installer qques packages
+
+   opam install lwt alt-ergo odoc odig
+
+ 1.7 On compile digodoc:
+
+   On crée un switch pas patché pour éviter les problèmes:
+   opam switch create 4.11.0
+
+   cd $HOME/DIGODOC/digodoc
+
+   ( on va utiliser le switch 4.11.0 localement: )
+   opam switch link 4.11.0
+
+   ( on installe les dépendances: )
+   make build-deps
+
+   ( on construit )
+   make
+
+
+
+
